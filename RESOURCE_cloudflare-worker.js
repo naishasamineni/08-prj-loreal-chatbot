@@ -1,40 +1,67 @@
-// Copy this code into your Cloudflare Worker script
-
 export default {
   async fetch(request, env) {
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-      'Content-Type': 'application/json'
-    };
-
-    // Handle CORS preflight requests
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { headers: corsHeaders });
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        headers: corsHeaders()
+      });
     }
 
-    const apiKey = env.OPENAI_API_KEY; // Make sure to name your secret OPENAI_API_KEY in the Cloudflare Workers dashboard
-    const apiUrl = 'https://api.openai.com/v1/chat/completions';
-    const userInput = await request.json();
+    if (request.method !== "POST") {
+      return jsonResponse({ error: "Method not allowed" }, 405);
+    }
 
-    const requestBody = {
-      model: 'gpt-4o',
-      messages: userInput.messages,
-      max_completion_tokens: 300,
-    };
+    try {
+      const body = await request.json();
+      const messages = body.messages || [];
 
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestBody)
-    });
+      const response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${env.OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: "gpt-4.1-mini",
+          input: messages
+        })
+      });
 
-    const data = await response.json();
+      const data = await response.json();
 
-    return new Response(JSON.stringify(data), { headers: corsHeaders });
+      if (!response.ok) {
+        return jsonResponse(
+          { error: data.error?.message || "OpenAI request failed" },
+          response.status
+        );
+      }
+
+      let reply = "Sorry, I could not generate a response.";
+
+      if (data.output_text) {
+        reply = data.output_text;
+      }
+
+      return jsonResponse({ reply }, 200);
+    } catch (error) {
+      return jsonResponse({ error: error.message }, 500);
+    }
   }
 };
+
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type"
+  };
+}
+
+function jsonResponse(data, status) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      ...corsHeaders()
+    }
+  });
+}
